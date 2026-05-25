@@ -5,17 +5,20 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 
 public class rest {
-    public static void main(String[] args) throws Exception{
+
+    public static void main(String[] args) throws Exception {
         String studentCode = "B22DCCN692";
-        String serverIp = "36.50.135.242";
-        String qCode = "";
-        String url = "http://" + serverIp + ":2230/api/rest/data?studentCode=" + studentCode + "&qCode=" + qCode;
+        String qCode = "lTvZRPrC";
+        String examIp = "36.50.135.242";
+        String url = "http://" + examIp + ":2230/api/rest/header?studentCode=" + studentCode + "&qCode=" + qCode;
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(new URI(url))
@@ -25,49 +28,46 @@ public class rest {
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
         System.out.println(response.body());
 
-        JsonObject json = JsonParser.parseString(response.body()).getAsJsonObject();
-        String requestId = json.get("requestId").getAsString();
-//        JsonArray arr = json.getAsJsonArray("data");
-//
-//        double capturedTotal = 0.0;
-//        double refundedTotal = 0.0;
-//        int failedCount = 0;
-//        for (JsonElement e: arr){
-//            JsonObject obj = e.getAsJsonObject();
-//            String status = obj.get("status").getAsString();
-//            double amount = obj.get("amount").getAsDouble();
-//            if("CAPTURED".equals(status)){
-//                capturedTotal += amount;
-//            }
-//            else if("REFUNDED".equals(status)){
-//                refundedTotal += amount;
-//            }
-//            else if("FAILED".equals(status)) {
-//                failedCount++;
-//            }
-//        }
-//        Double netTotal = capturedTotal - refundedTotal;
-//
-//        JsonObject answer = new JsonObject();
-//        answer.addProperty("capturedTotal", Math.round(capturedTotal * 100.0) / 100.0);
-//        answer.addProperty("refundedTotal", Math.round(refundedTotal * 100.0) / 100.0);
-//        answer.addProperty("netTotal", Math.round(netTotal * 100.0) / 100.0);
-//        answer.addProperty("failedCount", failedCount);
-//
-        JsonObject body = new JsonObject();
-//        body.addProperty("studentCode", studentCode);
-//        body.addProperty("qCode", qCode);
-//        body.addProperty("requestId", requestId);
-//        body.add("answer", answer);
-//        System.out.println(body);
+        JsonObject body = JsonParser.parseString(response.body()).getAsJsonObject();
+        String requestId = body.get("requestId").getAsString();
+        JsonObject data = body.get("data").getAsJsonObject();
+        String nonce = data.get("nonce").getAsString();
+        String signingKey = data.get("signingKey").getAsString();
+        JsonArray events = data.get("events").getAsJsonArray();
+        String eventsString = "";
+        for(JsonElement element : events){
+            String event = element.getAsString();
+            eventsString += event + "|";
+        }
+        eventsString = eventsString.substring(0, eventsString.length() - 1);
+        String payload = nonce + ":" + eventsString + ":" + studentCode;
+        System.out.println(payload);
 
-        url = "http://" + serverIp + ":2230/api/rest/data/submit";
+        Mac mac = Mac.getInstance("HmacSHA256");
+        SecretKeySpec secretKeySpec = new SecretKeySpec(signingKey.getBytes(), "HmacSHA256");
+        mac.init(secretKeySpec);
+        byte[] hmacBytes = mac.doFinal(payload.getBytes());
+        StringBuilder sb = new StringBuilder();
+        for (byte b : hmacBytes) {
+            sb.append(String.format("%02x", b));
+        }
+        String signature = sb.toString();
+        System.out.println(signature);
+
+        body = new JsonObject();
+        body.addProperty("studentCode", studentCode);
+        body.addProperty("qCode", qCode);
+        body.addProperty("requestId", requestId);
+        System.out.println(body);
+
+        url = "http://" + examIp + ":2230/api/rest/header/submit";
         request = HttpRequest.newBuilder()
                 .uri(new URI(url))
                 .header("Content-Type", "application/json")
+                .header("X-Signature", signature)
                 .POST(HttpRequest.BodyPublishers.ofString(body.toString()))
                 .build();
-        response = client.send(request,HttpResponse.BodyHandlers.ofString());
+        response = client.send(request, HttpResponse.BodyHandlers.ofString());
         System.out.println(response.body());
     }
 }
